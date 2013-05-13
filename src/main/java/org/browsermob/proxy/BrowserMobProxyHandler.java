@@ -145,6 +145,10 @@ public class BrowserMobProxyHandler extends SeleniumProxyHandler {
             if (urlStr.contains("/selenium-server/")) {
                 return super.proxyPlainTextRequest(url, pathInContext, pathParams, request, response);
             }
+            
+            if(url.getHost().equals("localhost")) {
+            	return super.proxyPlainTextRequest(url, pathInContext, pathParams, request, response);
+            }
 
             // we also don't URLs that Firefox always loads on startup showing up, or even wasting bandwidth.
             // so for these we just nuke them right on the spot!
