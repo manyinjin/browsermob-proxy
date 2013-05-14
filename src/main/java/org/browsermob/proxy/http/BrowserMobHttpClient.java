@@ -329,7 +329,7 @@ public class BrowserMobHttpClient {
     public BrowserMobHttpRequest newPost(String url, org.browsermob.proxy.jetty.http.HttpRequest proxyRequest) {
         try {
             URI uri = makeUri(url);
-            return new BrowserMobHttpRequest(new HttpPost(uri), this, -1, captureContent, proxyRequest);
+            return new BrowserMobHttpRequest(new HttpPost(uri), this, -1, needCopyOutputStream(), proxyRequest);
         } catch (URISyntaxException e) {
             throw reportBadURI(url, "POST");
         }
@@ -338,7 +338,7 @@ public class BrowserMobHttpClient {
     public BrowserMobHttpRequest newGet(String url, org.browsermob.proxy.jetty.http.HttpRequest proxyRequest) {
         try {
             URI uri = makeUri(url);
-            return new BrowserMobHttpRequest(new HttpGet(uri), this, -1, captureContent, proxyRequest);
+            return new BrowserMobHttpRequest(new HttpGet(uri), this, -1, needCopyOutputStream(), proxyRequest);
         } catch (URISyntaxException e) {
             throw reportBadURI(url, "GET");
         }
@@ -347,7 +347,7 @@ public class BrowserMobHttpClient {
     public BrowserMobHttpRequest newPut(String url, org.browsermob.proxy.jetty.http.HttpRequest proxyRequest) {
         try {
             URI uri = makeUri(url);
-            return new BrowserMobHttpRequest(new HttpPut(uri), this, -1, captureContent, proxyRequest);
+            return new BrowserMobHttpRequest(new HttpPut(uri), this, -1, needCopyOutputStream(), proxyRequest);
         } catch (Exception e) {
             throw reportBadURI(url, "PUT");
         }
@@ -356,7 +356,7 @@ public class BrowserMobHttpClient {
     public BrowserMobHttpRequest newDelete(String url, org.browsermob.proxy.jetty.http.HttpRequest proxyRequest) {
         try {
             URI uri = makeUri(url);
-            return new BrowserMobHttpRequest(new HttpDelete(uri), this, -1, captureContent, proxyRequest);
+            return new BrowserMobHttpRequest(new HttpDelete(uri), this, -1, needCopyOutputStream(), proxyRequest);
         } catch (URISyntaxException e) {
             throw reportBadURI(url, "DELETE");
         }
@@ -365,7 +365,7 @@ public class BrowserMobHttpClient {
     public BrowserMobHttpRequest newOptions(String url, org.browsermob.proxy.jetty.http.HttpRequest proxyRequest) {
         try {
             URI uri = makeUri(url);
-            return new BrowserMobHttpRequest(new HttpOptions(uri), this, -1, captureContent, proxyRequest);
+            return new BrowserMobHttpRequest(new HttpOptions(uri), this, -1, needCopyOutputStream(), proxyRequest);
         } catch (URISyntaxException e) {
             throw reportBadURI(url, "OPTIONS");
         }
@@ -374,7 +374,7 @@ public class BrowserMobHttpClient {
     public BrowserMobHttpRequest newHead(String url, org.browsermob.proxy.jetty.http.HttpRequest proxyRequest) {
         try {
             URI uri = makeUri(url);
-            return new BrowserMobHttpRequest(new HttpHead(uri), this, -1, captureContent, proxyRequest);
+            return new BrowserMobHttpRequest(new HttpHead(uri), this, -1, needCopyOutputStream(), proxyRequest);
         } catch (URISyntaxException e) {
             throw reportBadURI(url, "HEAD");
         }
@@ -675,7 +675,7 @@ public class BrowserMobHttpClient {
                         is = new GZIPInputStream(is);
                     }
 
-                    if (captureContent) {
+                    if (needCopyOutputStream()) {
                         // todo - something here?
                         os = new ClonedOutputStream(os);
 
@@ -729,7 +729,7 @@ public class BrowserMobHttpClient {
         }
 
         boolean urlEncoded = false;
-        if (captureHeaders || captureContent) {
+        if (captureHeaders || needCopyOutputStream()) {
             for (Header header : method.getAllHeaders()) {
                 if (header.getValue() != null && header.getValue().startsWith(URLEncodedUtils.CONTENT_TYPE)) {
                     urlEncoded = true;
@@ -745,7 +745,7 @@ public class BrowserMobHttpClient {
             }
         }
 
-        if (captureContent) {
+        if (needCopyOutputStream()) {
             // can we understand the POST data at all?
             if (method instanceof HttpEntityEnclosingRequestBase && req.getCopy() != null) {
                 HttpEntityEnclosingRequestBase enclosingReq = (HttpEntityEnclosingRequestBase) method;
@@ -797,7 +797,7 @@ public class BrowserMobHttpClient {
                     contentType = contentTypeHdr.getValue();
                     entry.getResponse().getContent().setMimeType(contentType);
                     
-                    if ((captureContent ||(rawContentsPath != null && new File(rawContentsPath).exists()))  && os != null && os instanceof ClonedOutputStream) {
+                    if (needCopyOutputStream()  && os != null && os instanceof ClonedOutputStream) {
                     	byte[] data = this.getResponseData(os, gzipping, contentType, entry);
 
                     	if(captureContent) {
@@ -1262,5 +1262,9 @@ public class BrowserMobHttpClient {
         }
 
         return bytesCopied;
+    }
+    
+    private boolean needCopyOutputStream() {
+    	return captureContent || (rawContentsPath != null && new File(rawContentsPath).exists());
     }
 }
