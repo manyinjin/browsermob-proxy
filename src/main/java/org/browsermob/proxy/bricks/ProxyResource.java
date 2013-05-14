@@ -1,5 +1,29 @@
 package org.browsermob.proxy.bricks;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Hashtable;
+import java.util.Map;
+
+import javax.script.Bindings;
+import javax.script.Compilable;
+import javax.script.CompiledScript;
+import javax.script.ScriptEngine;
+import javax.script.ScriptEngineManager;
+import javax.script.ScriptException;
+
+import org.browsermob.core.har.Har;
+import org.browsermob.proxy.ProxyManager;
+import org.browsermob.proxy.ProxyServer;
+import org.browsermob.proxy.http.BrowserMobHttpRequest;
+import org.browsermob.proxy.http.BrowserMobHttpResponse;
+import org.browsermob.proxy.http.RequestInterceptor;
+import org.browsermob.proxy.http.ResponseInterceptor;
+import org.browsermob.proxy.util.Log;
+import org.java_bandwidthlimiter.StreamManager;
+
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
 import com.google.sitebricks.At;
@@ -11,22 +35,6 @@ import com.google.sitebricks.http.Delete;
 import com.google.sitebricks.http.Get;
 import com.google.sitebricks.http.Post;
 import com.google.sitebricks.http.Put;
-import org.browsermob.core.har.Har;
-import org.browsermob.proxy.ProxyManager;
-import org.browsermob.proxy.ProxyServer;
-import org.browsermob.proxy.http.BrowserMobHttpRequest;
-import org.browsermob.proxy.http.BrowserMobHttpResponse;
-import org.browsermob.proxy.http.RequestInterceptor;
-import org.browsermob.proxy.http.ResponseInterceptor;
-import org.browsermob.proxy.util.Log;
-import org.java_bandwidthlimiter.StreamManager;
-
-import javax.script.*;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Hashtable;
-import java.util.Map;
 
 @At("/proxy")
 @Service
@@ -56,13 +64,21 @@ public class ProxyResource {
 
         String paramPort = request.param("port");
         int port = 0;
+        ProxyServer proxy = null;
         if (paramPort != null) {
             port = Integer.parseInt(paramPort);
-            ProxyServer proxy = proxyManager.create(options, port);
+            proxy = proxyManager.create(options, port);
         } else {
-            ProxyServer proxy = proxyManager.create(options);
+            proxy = proxyManager.create(options);
             port = proxy.getPort();
         }
+        
+        String rawContentsPath = request.param("rawContentsPath");
+        if(rawContentsPath != null && new File(rawContentsPath).exists()) {
+        	proxy.setCaptureContent(true);
+        	proxy.setRawContentsPath(rawContentsPath);
+        }
+        
         return Reply.with(new ProxyDescriptor(port)).as(Json.class);
     }
 

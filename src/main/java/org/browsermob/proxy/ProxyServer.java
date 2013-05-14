@@ -134,6 +134,9 @@ public class ProxyServer {
     }
 
     public void newPage(String pageRef) {
+    	//end the last page
+    	endPage();
+    	
         if (pageRef == null) {
             pageRef = "Page " + pageCount;
         }
@@ -248,6 +251,14 @@ public class ProxyServer {
     
     public void setCaptureBinaryContent(boolean captureBinaryContent) {
         client.setCaptureBinaryContent(captureBinaryContent);
+    }
+    
+    /**
+     * capture the raw content to a folder on the proxy server
+     * @param rawContentFolder
+     */
+    public void setRawContentsPath(String rawContentsPath) {
+    	client.setRawContentsPath(rawContentsPath);
     }
 
     public void clearDNSCache() {

@@ -1,12 +1,65 @@
 package org.browsermob.proxy.http;
 
-import cz.mallat.uasparser.CachingOnlineUpdateUASparser;
-import cz.mallat.uasparser.UASparser;
-import cz.mallat.uasparser.UserAgentInfo;
-import org.apache.http.*;
-import org.apache.http.auth.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
+
+import org.apache.commons.lang.StringUtils;
+import org.apache.http.Header;
+import org.apache.http.HeaderElement;
+import org.apache.http.HttpClientConnection;
+import org.apache.http.HttpConnection;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpException;
+import org.apache.http.HttpHost;
+import org.apache.http.HttpRequest;
+import org.apache.http.HttpRequestInterceptor;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpResponseInterceptor;
+import org.apache.http.NameValuePair;
+import org.apache.http.ParseException;
+import org.apache.http.StatusLine;
+import org.apache.http.auth.AuthScheme;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.AuthState;
+import org.apache.http.auth.Credentials;
+import org.apache.http.auth.NTCredentials;
+import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
-import org.apache.http.client.methods.*;
+import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.methods.HttpOptions;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.client.params.ClientPNames;
 import org.apache.http.client.params.CookiePolicy;
 import org.apache.http.client.protocol.ClientContext;
@@ -18,7 +71,11 @@ import org.apache.http.conn.params.ConnRoutePNames;
 import org.apache.http.conn.routing.HttpRoute;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.cookie.*;
+import org.apache.http.cookie.Cookie;
+import org.apache.http.cookie.CookieOrigin;
+import org.apache.http.cookie.CookieSpec;
+import org.apache.http.cookie.CookieSpecFactory;
+import org.apache.http.cookie.MalformedCookieException;
 import org.apache.http.cookie.params.CookieSpecPNames;
 import org.apache.http.impl.auth.BasicScheme;
 import org.apache.http.impl.client.DefaultHttpClient;
@@ -32,25 +89,30 @@ import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.protocol.HttpRequestExecutor;
-import org.browsermob.core.har.*;
-import org.browsermob.proxy.util.*;
+import org.browsermob.core.har.Har;
+import org.browsermob.core.har.HarCookie;
+import org.browsermob.core.har.HarEntry;
+import org.browsermob.core.har.HarNameValuePair;
+import org.browsermob.core.har.HarNameVersion;
+import org.browsermob.core.har.HarPostData;
+import org.browsermob.core.har.HarPostDataParam;
+import org.browsermob.core.har.HarRequest;
+import org.browsermob.core.har.HarResponse;
+import org.browsermob.core.har.HarTimings;
+import org.browsermob.proxy.util.Base64;
+import org.browsermob.proxy.util.CappedByteArrayOutputStream;
+import org.browsermob.proxy.util.ClonedOutputStream;
+import org.browsermob.proxy.util.IOUtils;
+import org.browsermob.proxy.util.Log;
 import org.eclipse.jetty.util.MultiMap;
 import org.eclipse.jetty.util.UrlEncoded;
 import org.java_bandwidthlimiter.StreamManager;
 import org.xbill.DNS.Cache;
 import org.xbill.DNS.DClass;
 
-import java.io.*;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.zip.GZIPInputStream;
+import cz.mallat.uasparser.CachingOnlineUpdateUASparser;
+import cz.mallat.uasparser.UASparser;
+import cz.mallat.uasparser.UserAgentInfo;
 
 public class BrowserMobHttpClient {
     private static final Log LOG = new Log();
@@ -107,6 +169,7 @@ public class BrowserMobHttpClient {
     private boolean followRedirects = true;
     private static final int MAX_REDIRECT = 10;
     private AtomicInteger requestCounter;
+    private String rawContentsPath;
 
     public BrowserMobHttpClient(StreamManager streamManager, AtomicInteger requestCounter) {
         this.requestCounter = requestCounter;
@@ -237,8 +300,16 @@ public class BrowserMobHttpClient {
     public Cookie getCookie(String name, String domain) {
         return getCookie(name, domain, null);
     }
+    
+    public String getRawContentsPath() {
+		return rawContentsPath;
+	}
 
-    public Cookie getCookie(String name, String domain, String path) {
+	public void setRawContentsPath(String rawContentsPath) {
+		this.rawContentsPath = rawContentsPath;
+	}
+
+	public Cookie getCookie(String name, String domain, String path) {
         for (Cookie cookie : httpClient.getCookieStore().getCookies()) {
             if(cookie.getName().equals(name)) {
                 if(domain != null && !domain.equals(cookie.getDomain())) {
@@ -725,33 +796,39 @@ public class BrowserMobHttpClient {
                 if (contentTypeHdr != null) {
                     contentType = contentTypeHdr.getValue();
                     entry.getResponse().getContent().setMimeType(contentType);
+                    
+                    if ((captureContent ||(rawContentsPath != null && new File(rawContentsPath).exists()))  && os != null && os instanceof ClonedOutputStream) {
+                    	byte[] data = this.getResponseData(os, gzipping, contentType, entry);
 
-                    if (captureContent && os != null && os instanceof ClonedOutputStream) {
-                        ByteArrayOutputStream copy = ((ClonedOutputStream) os).getOutput();
-
-                        if (gzipping) {
-                            // ok, we need to decompress it before we can put it in the har file
-                            try {
-                                InputStream temp = new GZIPInputStream(new ByteArrayInputStream(copy.toByteArray()));
-                                copy = new ByteArrayOutputStream();
-                                IOUtils.copy(temp, copy);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
+                    	if(captureContent) {
+                    		if (contentType != null && (contentType.startsWith("text/")  || 
+                            		contentType.startsWith("application/x-javascript")) ||
+                            		contentType.startsWith("application/javascript")  ||
+                            		contentType.startsWith("application/json")  ||
+                            		contentType.startsWith("application/xml")  ||
+                            		contentType.startsWith("application/xhtml+xml")) {
+                                entry.getResponse().getContent().setText(new String(data));
+                            } else if(captureBinaryContent){
+                                entry.getResponse().getContent().setText(Base64.byteArrayToBase64(data));
                             }
-                        }
-
-                        if (contentType != null && (contentType.startsWith("text/")  || 
-                        		contentType.startsWith("application/x-javascript")) ||
-                        		contentType.startsWith("application/javascript")  ||
-                        		contentType.startsWith("application/json")  ||
-                        		contentType.startsWith("application/xml")  ||
-                        		contentType.startsWith("application/xhtml+xml")) {
-                            entry.getResponse().getContent().setText(new String(copy.toByteArray()));
-                        } else if(captureBinaryContent){
-                            entry.getResponse().getContent().setText(Base64.byteArrayToBase64(copy.toByteArray()));
-                        }
+                    	}
+                    	
+                    	if(rawContentsPath != null && new File(rawContentsPath).exists()) {
+	                    	try {
+	                    		String fileName = rawContentsPath;
+	                    		if(!rawContentsPath.endsWith(File.separator)) {
+	                    			fileName += File.separator;
+	                    		}
+	                    		
+								FileOutputStream fos = new FileOutputStream(getFileNameFromUrl(fileName + entry.getPageref(), entry.getRequest().getUrl()));
+								fos.write(data); 
+							} catch (FileNotFoundException e) {
+								e.printStackTrace();
+							} catch (IOException e) {
+								e.printStackTrace();
+							}
+                    	}
                     }
-
 
                     NameValuePair nvp = contentTypeHdr.getElements()[0].getParameterByName("charset");
 
@@ -842,6 +919,58 @@ public class BrowserMobHttpClient {
         
 
         return new BrowserMobHttpResponse(entry, method, response, contentMatched, verificationText, errorMessage, responseBody, contentType, charSet);
+    }
+    
+    private byte[] getResponseData(OutputStream os, boolean gzipping, String contentType, HarEntry entry) {
+        ByteArrayOutputStream copy = ((ClonedOutputStream) os).getOutput();
+
+        if (gzipping) {
+            // ok, we need to decompress it before we can put it in the har file
+            try {
+                InputStream temp = new GZIPInputStream(new ByteArrayInputStream(copy.toByteArray()));
+                copy = new ByteArrayOutputStream();
+                IOUtils.copy(temp, copy);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        
+        return copy.toByteArray();
+    }
+    
+    private String getFileNameFromUrl(String parentPath,  String url) {
+    	if(url == null) {
+    		return "";
+    	} 
+    	try {
+			URL aURL = new URL(url);
+			String filePath = parentPath + File.separator + aURL.getHost();
+			if(aURL.getPort() > 0) {
+				filePath += "_" + aURL.getPort();
+			}
+			String fileName = "index";
+			
+			String path = aURL.getPath();
+			if(!StringUtils.isBlank(path) && !"/".equals(path)) {
+				String[] pathes = path.split("\\/");
+				for(int i=0; i<pathes.length -1; i++) {
+					String subPath = pathes[i];
+					if(!StringUtils.isBlank(subPath)) {
+					    filePath = filePath + File.separator + subPath;
+					}
+				}
+				fileName = pathes[pathes.length -1];
+			}
+			
+			File absFile = new File(filePath);
+			if(!absFile.exists()) {
+				absFile.mkdirs();
+			}
+			
+			return filePath + File.separator + fileName;
+		} catch (MalformedURLException e) {
+			return "";
+		}
     }
 
     public void shutdown() {

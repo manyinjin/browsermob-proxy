@@ -168,8 +168,13 @@ public class RequestInfo {
         if (end == null || start == null) {
             return -1;
         }
-
-        return end.getTime() - start.getTime();
+        
+        long actualRunningTime = end.getTime() - start.getTime();
+        if(this.blocked != null) {
+            actualRunningTime += this.blocked;
+        }
+        
+        return actualRunningTime;
     }
 
     @Override
